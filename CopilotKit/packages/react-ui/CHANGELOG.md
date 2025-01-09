@@ -1,5 +1,83 @@
 # ui
 
+## 1.5.1-next.1
+
+### Patch Changes
+
+- 03f3d6f: Test next prerelease
+- Updated dependencies [03f3d6f]
+  - @copilotkit/react-core@1.5.1-next.1
+  - @copilotkit/runtime-client-gql@1.5.1-next.1
+  - @copilotkit/shared@1.5.1-next.1
+
+## 1.5.1-next.0
+
+### Patch Changes
+
+- 27e42d7: testing a prerelease
+- Updated dependencies [27e42d7]
+- Updated dependencies [6dfa0d2]
+  - @copilotkit/react-core@1.5.1-next.0
+  - @copilotkit/runtime-client-gql@1.5.1-next.0
+  - @copilotkit/shared@1.5.1-next.0
+
+## 1.5.0
+
+### Minor Changes
+
+- 1b47092: Synchronize LangGraph messages with CopilotKit
+
+### Patch Changes
+
+- 1b47092: CoAgents v0.3 prerelease
+- Updated dependencies [1b47092]
+- Updated dependencies [00e9488]
+- Updated dependencies [1b47092]
+  - @copilotkit/runtime-client-gql@1.5.0
+  - @copilotkit/react-core@1.5.0
+  - @copilotkit/shared@1.5.0
+
+## 1.5.0-coagents-v0-3.0
+
+### Minor Changes
+
+- Synchronize LangGraph messages with CopilotKit
+
+### Patch Changes
+
+- e66bce4: CoAgents v0.3 prerelease
+- Updated dependencies
+- Updated dependencies [e66bce4]
+  - @copilotkit/runtime-client-gql@1.5.0-coagents-v0-3.0
+  - @copilotkit/react-core@1.5.0-coagents-v0-3.0
+  - @copilotkit/shared@1.5.0-coagents-v0-3.0
+
+## 1.4.8
+
+### Patch Changes
+
+- ea0c5d5: - fix: prevent sending empty messages via Enter key
+
+  When the input field was empty, pressing Enter would still trigger the
+  send() function despite the send button being correctly disabled. Added
+  the sendDisabled check to the onKeyDown handler to ensure consistent
+  validation between button and keyboard triggers.
+
+  - Added validation check to Enter key handler
+  - Ensures empty messages can't be sent via keyboard shortcut
+  - Makes behavior consistent with disabled send button state
+
+  Resolves #1129
+
+- - Better error handling
+  - Introduce new "EmptyLLMAdapter" for when using CoAgents
+  - Improve dev console help options
+  - Allow CopilotKit remote endpoint without agents
+- Updated dependencies
+  - @copilotkit/react-core@1.4.8
+  - @copilotkit/runtime-client-gql@1.4.8
+  - @copilotkit/shared@1.4.8
+
 ## 1.4.8-next.0
 
 ### Patch Changes

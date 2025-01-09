@@ -1,5 +1,46 @@
 # @copilotkit/shared
 
+## 1.5.1-next.1
+
+### Patch Changes
+
+- 03f3d6f: Test next prerelease
+
+## 1.5.1-next.0
+
+### Patch Changes
+
+- 27e42d7: testing a prerelease
+
+## 1.5.0
+
+### Minor Changes
+
+- 1b47092: Synchronize LangGraph messages with CopilotKit
+
+### Patch Changes
+
+- 1b47092: CoAgents v0.3 prerelease
+
+## 1.5.0-coagents-v0-3.0
+
+### Minor Changes
+
+- Synchronize LangGraph messages with CopilotKit
+
+### Patch Changes
+
+- e66bce4: CoAgents v0.3 prerelease
+
+## 1.4.8
+
+### Patch Changes
+
+- - Better error handling
+  - Introduce new "EmptyLLMAdapter" for when using CoAgents
+  - Improve dev console help options
+  - Allow CopilotKit remote endpoint without agents
+
 ## 1.4.8-next.0
 
 ## 1.4.7

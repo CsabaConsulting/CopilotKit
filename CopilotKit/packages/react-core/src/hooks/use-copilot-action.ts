@@ -71,6 +71,15 @@
  *     );
  *   },
  * });
+ *
+ * @example
+ * // Catch all action allows you to render actions that are not defined in the frontend
+ * useCopilotAction({
+ *   name: "*",
+ *   render: ({ name, args, status, result, handler, respond }) => {
+ *     return <div>Rendering action: {name}</div>;
+ *   },
+ * });
  */
 
 /**
@@ -124,10 +133,12 @@
 import { Parameter, randomId } from "@copilotkit/shared";
 import { createElement, Fragment, useEffect, useRef } from "react";
 import { useCopilotContext } from "../context/copilot-context";
+import { useAsyncCallback } from "../components/error-boundary/error-utils";
 import {
   ActionRenderProps,
   ActionRenderPropsNoArgsWait,
   ActionRenderPropsWait,
+  CatchAllFrontendAction,
   FrontendAction,
 } from "../types/frontend-action";
 
@@ -141,7 +152,7 @@ import {
 // useCallback, useMemo or other memoization techniques are not suitable here,
 // because they will cause a infinite rerender loop.
 export function useCopilotAction<const T extends Parameter[] | [] = []>(
-  action: FrontendAction<T>,
+  action: FrontendAction<T> | CatchAllFrontendAction,
   dependencies?: any[],
 ): void {
   const { setAction, removeAction, actions, chatComponentsCache } = useCopilotContext();
@@ -151,15 +162,20 @@ export function useCopilotAction<const T extends Parameter[] | [] = []>(
   // clone the action to avoid mutating the original object
   action = { ...action };
 
-  // If the developer provides a renderAndWait function, we transform the action
+  // If the developer provides a renderAndWaitForResponse function, we transform the action
   // to use a promise internally, so that we can treat it like a normal action.
-  if (action.renderAndWait || action.renderAndWaitForResponse) {
+  if (
+    // renderAndWaitForResponse is not available for catch all actions
+    isFrontendAction(action) &&
+    // check if renderAndWaitForResponse is set
+    (action.renderAndWait || action.renderAndWaitForResponse)
+  ) {
     const renderAndWait = action.renderAndWait || action.renderAndWaitForResponse;
     // remove the renderAndWait function from the action
     action.renderAndWait = undefined;
     action.renderAndWaitForResponse = undefined;
     // add a handler that will be called when the action is executed
-    action.handler = (async () => {
+    action.handler = useAsyncCallback(async () => {
       // we create a new promise when the handler is called
       let resolve: (result: any) => void;
       let reject: (error: any) => void;
@@ -170,17 +186,23 @@ export function useCopilotAction<const T extends Parameter[] | [] = []>(
       renderAndWaitRef.current = { promise, resolve: resolve!, reject: reject! };
       // then we await the promise (it will be resolved in the original renderAndWait function)
       return await promise;
-    }) as any;
+    }, []) as any;
 
     // add a render function that will be called when the action is rendered
     action.render = ((props: ActionRenderProps<T>): React.ReactElement => {
+      // Specifically for renderAndWaitForResponse the executing state is set too early, causing a race condition
+      // To fit it: we will wait for the handler to be ready
+      let status = props.status;
+      if (props.status === "executing" && !renderAndWaitRef.current) {
+        status = "inProgress";
+      }
       // Create type safe waitProps based on whether T extends empty array or not
       const waitProps = {
-        status: props.status,
+        status,
         args: props.args,
         result: props.result,
-        handler: props.status === "executing" ? renderAndWaitRef.current!.resolve : undefined,
-        respond: props.status === "executing" ? renderAndWaitRef.current!.resolve : undefined,
+        handler: status === "executing" ? renderAndWaitRef.current!.resolve : undefined,
+        respond: status === "executing" ? renderAndWaitRef.current!.resolve : undefined,
       } as T extends [] ? ActionRenderPropsNoArgsWait<T> : ActionRenderPropsWait<T>;
 
       // Type guard to check if renderAndWait is for no args case
@@ -211,10 +233,15 @@ export function useCopilotAction<const T extends Parameter[] | [] = []>(
   // This ensures that any captured variables in the handler are up to date.
   if (dependencies === undefined) {
     if (actions[idRef.current]) {
-      actions[idRef.current].handler = action.handler as any;
+      // catch all actions don't have a handler
+      if (isFrontendAction(action)) {
+        actions[idRef.current].handler = action.handler as any;
+      }
       if (typeof action.render === "function") {
         if (chatComponentsCache.current !== null) {
-          chatComponentsCache.current.actions[action.name] = action.render;
+          // TODO: using as any here because the type definitions are getting to tricky
+          // not wasting time on this now - we know the types are compatible
+          chatComponentsCache.current.actions[action.name] = action.render as any;
         }
       }
     }
@@ -223,28 +250,36 @@ export function useCopilotAction<const T extends Parameter[] | [] = []>(
   useEffect(() => {
     setAction(idRef.current, action as any);
     if (chatComponentsCache.current !== null && action.render !== undefined) {
-      chatComponentsCache.current.actions[action.name] = action.render;
+      // see comment about type safety above
+      chatComponentsCache.current.actions[action.name] = action.render as any;
     }
     return () => {
       // NOTE: For now, we don't remove the chatComponentsCache entry when the action is removed.
       // This is because we currently don't have access to the messages array in CopilotContext.
+      // UPDATE: We now have access, we should remove the entry if not referenced by any message.
       removeAction(idRef.current);
     };
   }, [
     setAction,
     removeAction,
-    action.description,
+    isFrontendAction(action) ? action.description : undefined,
     action.name,
-    action.disabled,
-    action.available,
+    isFrontendAction(action) ? action.disabled : undefined,
+    isFrontendAction(action) ? action.available : undefined,
     // This should be faster than deep equality checking
     // In addition, all major JS engines guarantee the order of object keys
-    JSON.stringify(action.parameters),
+    JSON.stringify(isFrontendAction(action) ? action.parameters : []),
     // include render only if it's a string
     typeof action.render === "string" ? action.render : undefined,
     // dependencies set by the developer
     ...(dependencies || []),
   ]);
+}
+
+function isFrontendAction<T extends Parameter[]>(
+  action: FrontendAction<T> | CatchAllFrontendAction,
+): action is FrontendAction<T> {
+  return action.name !== "*";
 }
 
 interface RenderAndWaitForResponse {

@@ -20,6 +20,7 @@ import {
   CopilotApiConfig,
   ChatComponentsCache,
   AgentSession,
+  AuthState,
 } from "../../context/copilot-context";
 import useTree from "../../hooks/use-tree";
 import { CopilotChatSuggestionConfiguration, DocumentPointer } from "../../types";
@@ -40,13 +41,16 @@ import { CopilotMessages } from "./copilot-messages";
 import { ToastProvider } from "../toast/toast-provider";
 import { useCopilotRuntimeClient } from "../../hooks/use-copilot-runtime-client";
 import { shouldShowDevConsole } from "../../utils";
+import { CopilotErrorBoundary } from "../error-boundary/error-boundary";
 
 export function CopilotKit({ children, ...props }: CopilotKitProps) {
   const showDevConsole = props.showDevConsole === undefined ? "auto" : props.showDevConsole;
   const enabled = shouldShowDevConsole(showDevConsole);
   return (
     <ToastProvider enabled={enabled}>
-      <CopilotKitInternal {...props}>{children}</CopilotKitInternal>
+      <CopilotErrorBoundary>
+        <CopilotKitInternal {...props}>{children}</CopilotKitInternal>
+      </CopilotErrorBoundary>
     </ToastProvider>
   );
 }
@@ -74,6 +78,7 @@ export function CopilotKitInternal({ children, ...props }: CopilotKitProps) {
   const { addElement, removeElement, printTree } = useTree();
   const [isLoading, setIsLoading] = useState(false);
   const [chatInstructions, setChatInstructions] = useState("");
+  const [authStates, setAuthStates] = useState<Record<string, AuthState>>({});
 
   const {
     addElement: addDocument,
@@ -221,12 +226,31 @@ export function CopilotKitInternal({ children, ...props }: CopilotKitProps) {
     props.cloudRestrictToTopic,
   ]);
 
-  const headers = {
-    ...(copilotApiConfig.headers || {}),
-    ...(copilotApiConfig.publicApiKey
-      ? { [COPILOT_CLOUD_PUBLIC_API_KEY_HEADER]: copilotApiConfig.publicApiKey }
-      : {}),
-  };
+  const headers = useMemo(() => {
+    const authHeaders = Object.values(authStates || {}).reduce((acc, state) => {
+      if (state.status === "authenticated" && state.authHeaders) {
+        return {
+          ...acc,
+          ...Object.entries(state.authHeaders).reduce(
+            (headers, [key, value]) => ({
+              ...headers,
+              [key.startsWith("X-Custom-") ? key : `X-Custom-${key}`]: value,
+            }),
+            {},
+          ),
+        };
+      }
+      return acc;
+    }, {});
+
+    return {
+      ...(copilotApiConfig.headers || {}),
+      ...(copilotApiConfig.publicApiKey
+        ? { [COPILOT_CLOUD_PUBLIC_API_KEY_HEADER]: copilotApiConfig.publicApiKey }
+        : {}),
+      ...authHeaders,
+    };
+  }, [copilotApiConfig.headers, copilotApiConfig.publicApiKey, authStates]);
 
   const runtimeClient = useCopilotRuntimeClient({
     url: copilotApiConfig.chatApiEndpoint,
@@ -278,6 +302,10 @@ export function CopilotKitInternal({ children, ...props }: CopilotKitProps) {
   }
 
   const [agentSession, setAgentSession] = useState<AgentSession | null>(initialAgentSession);
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
+
+  const chatAbortControllerRef = useRef<AbortController | null>(null);
 
   const showDevConsole = props.showDevConsole === undefined ? "auto" : props.showDevConsole;
 
@@ -314,6 +342,16 @@ export function CopilotKitInternal({ children, ...props }: CopilotKitProps) {
         agentSession,
         setAgentSession,
         runtimeClient,
+        forwardedParameters: props.forwardedParameters || {},
+        agentLock: props.agent || null,
+        threadId,
+        setThreadId,
+        runId,
+        setRunId,
+        chatAbortControllerRef,
+        authConfig: props.authConfig,
+        authStates,
+        setAuthStates,
       }}
     >
       <CopilotMessages>{children}</CopilotMessages>
