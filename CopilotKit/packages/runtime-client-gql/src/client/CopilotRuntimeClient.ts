@@ -1,12 +1,38 @@
-import { Client, cacheExchange, fetchExchange } from "@urql/core";
+import {
+  Client,
+  cacheExchange,
+  fetchExchange,
+  mapExchange,
+  CombinedError,
+  Operation,
+} from "@urql/core";
 import * as packageJson from "../../package.json";
 
 import {
+  AvailableAgentsQuery,
   GenerateCopilotResponseMutation,
   GenerateCopilotResponseMutationVariables,
 } from "../graphql/@generated/graphql";
 import { generateCopilotResponseMutation } from "../graphql/definitions/mutations";
+import { getAvailableAgentsQuery } from "../graphql/definitions/queries";
 import { OperationResultSource, OperationResult } from "urql";
+
+const createFetchFn =
+  (signal?: AbortSignal) =>
+  async (...args: Parameters<typeof fetch>) => {
+    const result = await fetch(args[0], { ...(args[1] ?? {}), signal });
+    if (result.status !== 200) {
+      switch (result.status) {
+        case 404:
+          throw new Error(
+            "Runtime URL seems to be invalid - got 404 response. Please check the runtimeUrl passed to CopilotKit",
+          );
+        default:
+          throw new Error("Could not fetch copilot response");
+      }
+    }
+    return result;
+  };
 
 export interface CopilotRuntimeClientOptions {
   url: string;
@@ -55,20 +81,7 @@ export class CopilotRuntimeClient {
     properties?: GenerateCopilotResponseMutationVariables["properties"];
     signal?: AbortSignal;
   }) {
-    const fetchFn = async (...args: Parameters<typeof fetch>) => {
-      const result = await fetch(args[0], { ...(args[1] ?? {}), signal });
-      if (result.status !== 200) {
-        switch (result.status) {
-          case 404:
-            throw new Error(
-              "Runtime URL seems to be invalid - got 404 response. Please check the runtimeUrl passed to CopilotKit",
-            );
-          default:
-            throw new Error("Could not fetch copilot response");
-        }
-      }
-      return result;
-    };
+    const fetchFn = createFetchFn(signal);
     const result = this.client.mutation<
       GenerateCopilotResponseMutation,
       GenerateCopilotResponseMutationVariables
@@ -83,6 +96,14 @@ export class CopilotRuntimeClient {
       start(controller) {
         source.subscribe(({ data, hasNext, error }) => {
           if (error) {
+            if (
+              error.message.includes("BodyStreamBuffer was aborted") ||
+              error.message.includes("signal is aborted without reason")
+            ) {
+              // Suppress this specific error
+              console.warn("Abort error suppressed");
+              return;
+            }
             controller.error(error);
             if (handleGQLErrors) {
               handleGQLErrors(error);
@@ -96,5 +117,10 @@ export class CopilotRuntimeClient {
         });
       },
     });
+  }
+
+  availableAgents() {
+    const fetchFn = createFetchFn();
+    return this.client.query<AvailableAgentsQuery>(getAvailableAgentsQuery, {}, { fetch: fetchFn });
   }
 }

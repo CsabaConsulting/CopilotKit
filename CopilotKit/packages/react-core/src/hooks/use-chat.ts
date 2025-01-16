@@ -2,8 +2,8 @@ import { useRef } from "react";
 import {
   FunctionCallHandler,
   COPILOT_CLOUD_PUBLIC_API_KEY_HEADER,
-  actionParametersToJsonSchema,
   CoAgentStateRenderHandler,
+  randomId,
 } from "@copilotkit/shared";
 import {
   Message,
@@ -17,7 +17,6 @@ import {
   MessageRole,
   Role,
   CopilotRequestType,
-  ActionInputAvailability,
   ForwardedParametersInput,
   loadMessagesFromJsonRepresentation,
 } from "@copilotkit/runtime-client-gql";
@@ -26,9 +25,8 @@ import { CopilotApiConfig } from "../context";
 import { FrontendAction, processActionsForRuntimeRequest } from "../types/frontend-action";
 import { CoagentState } from "../types/coagent-state";
 import { AgentSession } from "../context/copilot-context";
-import { useToast } from "../components/toast/toast-provider";
 import { useCopilotRuntimeClient } from "./use-copilot-runtime-client";
-import { useAsyncCallback } from "../components/error-boundary/error-utils";
+import { useAsyncCallback, useErrorToast } from "../components/error-boundary/error-utils";
 
 export type UseChatOptions = {
   /**
@@ -126,6 +124,10 @@ export type UseChatOptions = {
    * The global chat abort controller.
    */
   chatAbortControllerRef: React.MutableRefObject<AbortController | null>;
+  /**
+   * The agent lock.
+   */
+  agentLock: string | null;
 };
 
 export type UseChatHelpers = {
@@ -134,7 +136,7 @@ export type UseChatHelpers = {
    * the assistant's response.
    * @param message The message to append
    */
-  append: (message: Message) => Promise<void>;
+  append: (message: Message, options?: AppendMessageOptions) => Promise<void>;
   /**
    * Reload the last AI chat response for the given chat history. If the last
    * message isn't from the assistant, it will request the API to generate a
@@ -151,6 +153,13 @@ export type UseChatHelpers = {
    */
   runChatCompletion: () => Promise<Message[]>;
 };
+
+export interface AppendMessageOptions {
+  /**
+   * Whether to run the chat completion after appending the message. Defaults to `true`.
+   */
+  followUp?: boolean;
+}
 
 export function useChat(options: UseChatOptions): UseChatHelpers {
   const {
@@ -173,9 +182,10 @@ export function useChat(options: UseChatOptions): UseChatHelpers {
     runId,
     setRunId,
     chatAbortControllerRef,
+    agentLock,
   } = options;
-  const { addGraphQLErrorsToast } = useToast();
   const runChatCompletionRef = useRef<(previousMessages: Message[]) => Promise<Message[]>>();
+  const addErrorToast = useErrorToast();
   // We need to keep a ref of coagent states and session because of renderAndWait - making sure
   // the latest state is sent to the API
   // This is a workaround and needs to be addressed in the future
@@ -393,7 +403,15 @@ export function useChat(options: UseChatOptions): UseChatHelpers {
                   nodeName: lastAgentStateMessage.nodeName,
                 });
               } else {
-                setAgentSession(null);
+                if (agentLock) {
+                  setAgentSession({
+                    threadId: randomId(),
+                    agentName: agentLock,
+                    nodeName: undefined,
+                  });
+                } else {
+                  setAgentSession(null);
+                }
               }
             }
           }
@@ -433,6 +451,7 @@ export function useChat(options: UseChatOptions): UseChatHelpers {
             if (action) {
               followUp = action.followUp;
               let result: any;
+              let error: Error | null = null;
               try {
                 result = await Promise.race([
                   onFunctionCall({
@@ -453,8 +472,10 @@ export function useChat(options: UseChatOptions): UseChatHelpers {
                   }),
                 ]);
               } catch (e) {
-                result = `Failed to execute action ${message.name}`;
-                console.error(`Failed to execute action ${message.name}: ${e}`);
+                error = e as Error;
+                addErrorToast([error]);
+                result = `Failed to execute action ${message.name}. ${error.message}`;
+                console.error(`Failed to execute action ${message.name}: ${error}`);
               }
               didExecuteAction = true;
               const messageIndex = finalMessages.findIndex((msg) => msg.id === message.id);
@@ -463,7 +484,16 @@ export function useChat(options: UseChatOptions): UseChatHelpers {
                 0,
                 new ResultMessage({
                   id: "result-" + message.id,
-                  result: ResultMessage.encodeResult(result),
+                  result: ResultMessage.encodeResult(
+                    error
+                      ? {
+                          content: result,
+                          error: JSON.parse(
+                            JSON.stringify(error, Object.getOwnPropertyNames(error)),
+                          ),
+                        }
+                      : result,
+                  ),
                   actionExecutionId: message.id,
                   actionName: message.name,
                 }),
@@ -559,14 +589,17 @@ export function useChat(options: UseChatOptions): UseChatHelpers {
   );
 
   const append = useAsyncCallback(
-    async (message: Message): Promise<void> => {
+    async (message: Message, options?: AppendMessageOptions): Promise<void> => {
       if (isLoading) {
         return;
       }
 
       const newMessages = [...messages, message];
       setMessages(newMessages);
-      return runChatCompletionAndHandleFunctionCall(newMessages);
+      const followUp = options?.followUp ?? true;
+      if (followUp) {
+        return runChatCompletionAndHandleFunctionCall(newMessages);
+      }
     },
     [isLoading, messages, setMessages, runChatCompletionAndHandleFunctionCall],
   );

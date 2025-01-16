@@ -21,6 +21,9 @@
  *       role: Role.User,
  *     }),
  *   );
+ *
+ *   // optionally, you can append a message without running chat completion
+ *   appendMessage(yourMessage, { followUp: false });
  * }
  * ```
  *
@@ -42,9 +45,8 @@ import { useRef, useEffect, useCallback } from "react";
 import { AgentSession, useCopilotContext } from "../context/copilot-context";
 import { Message, Role, TextMessage } from "@copilotkit/runtime-client-gql";
 import { SystemMessageFunction } from "../types";
-import { useChat } from "./use-chat";
+import { useChat, AppendMessageOptions } from "./use-chat";
 import { defaultCopilotContextCategories } from "../components";
-import { MessageStatusCode } from "@copilotkit/runtime-client-gql";
 import { CoAgentStateRenderHandlerArguments } from "@copilotkit/shared";
 import { useCopilotMessagesContext } from "../context";
 import { useAsyncCallback } from "../components/error-boundary/error-utils";
@@ -74,7 +76,7 @@ export interface UseCopilotChatOptions {
 
 export interface UseCopilotChatReturn {
   visibleMessages: Message[];
-  appendMessage: (message: Message) => Promise<void>;
+  appendMessage: (message: Message, options?: AppendMessageOptions) => Promise<void>;
   setMessages: (messages: Message[]) => void;
   deleteMessage: (messageId: string) => void;
   reloadMessages: () => Promise<void>;
@@ -172,6 +174,7 @@ export function useCopilotChat({
     runId,
     setRunId,
     chatAbortControllerRef,
+    agentLock,
   });
 
   // this is a workaround born out of a bug that Athena incessantly ran into.
@@ -184,8 +187,8 @@ export function useCopilotChat({
   // we store the relevant function in a ref that is always up-to-date, and then we use that ref in the callback.
   const latestAppend = useUpdatedRef(append);
   const latestAppendFunc = useAsyncCallback(
-    async (message: Message) => {
-      return await latestAppend.current(message);
+    async (message: Message, options?: AppendMessageOptions) => {
+      return await latestAppend.current(message, options);
     },
     [latestAppend],
   );
@@ -296,6 +299,9 @@ Please assist them as best you can.
 You can ask them for clarifying questions if needed, but don't be annoying about it. If you can reasonably 'fill in the blanks' yourself, do so.
 
 If you would like to call a function, call it without saying anything else.
+In case of a function error:
+- If this error stems from incorrect function parameters or syntax, you may retry with corrected arguments.
+- If the error's source is unclear or seems unrelated to your input, do not attempt further retries.
 ` + (additionalInstructions ? `\n\n${additionalInstructions}` : "")
   );
 }
